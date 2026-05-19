@@ -1,7 +1,8 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { createProduk } from '../services/produk'
+import { createOrder, getOrders } from '../services/order'
 
 const statusFilters = ['Semua', 'Diproses', 'Dikirim', 'Selesai', 'Dibatalkan']
 const periodFilters = ['Semua', 'Hari Ini']
@@ -441,18 +442,20 @@ const createProduct = async () => {
   }
 
   // Kirim ke BE
+  let produkId = null
   try {
-    await createProduk(
+    const result = await createProduk(
       { nama_produk: name, harga_produk: price, jenis_produk: type },
       productFile.value
     )
+    produkId = result?.data?.id || null
   } catch (err) {
     productFormError.value = err.message || 'Gagal menyimpan produk ke server.'
     return
   }
 
   // Tambah ke daftar lokal setelah berhasil disimpan di BE
-  menuOptions.value.push({ name, type, price, image })
+  menuOptions.value.push({ name, type, price, image, produkId })
   selectedMenus.value = [...selectedMenus.value, name]
   menuQtyDraft[name] = 1
   resetProductForm()
@@ -625,7 +628,7 @@ const removeMenuOption = (index) => {
   }
 }
 
-const saveOrder = () => {
+const saveOrder = async () => {
   const customer = form.customer.trim()
   const orderItems = selectedMenuItems.value.map((item) => ({ ...item }))
   formError.value = ''
@@ -641,6 +644,26 @@ const saveOrder = () => {
   const actorLabel = isAdmin.value ? 'admin' : 'pelanggan'
 
   if (formMode.value === 'create') {
+    // Kirim setiap item sebagai order terpisah ke BE (BE = 1 produk per order)
+    for (const item of orderItems) {
+      const menuOption = findMenuOptionByName(item.name)
+      const produkId = menuOption?.produkId || null
+
+      if (produkId) {
+        try {
+          await createOrder({
+            nama_pelanggan: customer,
+            produk_id: produkId,
+            jumlah: item.qty,
+            total_harga: item.subtotal,
+          })
+        } catch (err) {
+          formError.value = err.message || 'Gagal menyimpan order ke server.'
+          return
+        }
+      }
+    }
+
     const newOrder = {
       id: `#ORD-${nextOrderNumber.value}`,
       customer,
@@ -764,6 +787,37 @@ const switchToAdmin = () => {
   localStorage.removeItem('isLoggedIn')
   router.push('/login')
 }
+
+// Load orders dari BE saat mounted
+onMounted(async () => {
+  try {
+    const beOrders = await getOrders()
+    if (beOrders.length) {
+      // Map data BE ke format FE untuk ditampilkan di tabel
+      const mapped = beOrders.map((o, i) => ({
+        id: o.id ? `#BE-${String(o.id).slice(0, 8)}` : `#BE-${i}`,
+        customer: o.nama_pelanggan,
+        menu: o.nama_produk || 'Produk',
+        qty: o.jumlah,
+        items: [{ name: o.nama_produk || 'Produk', qty: o.jumlah, price: Math.round(o.total_harga / o.jumlah), subtotal: o.total_harga }],
+        totalAmount: o.total_harga,
+        status: o.status_pesanan === 'Proses' ? 'Diproses' : o.status_pesanan,
+        time: o.created_at ? new Date(o.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-',
+        date: o.created_at ? new Date(o.created_at).toISOString().slice(0, 10) : today,
+        timeline: [{ id: 1, text: 'Order dari database', meta: '-' }],
+        fromBE: true,
+      }))
+      // Gabungkan dengan order lokal, hindari duplikat
+      const localIds = new Set(orders.value.map(o => o.id))
+      const newOrders = mapped.filter(o => !localIds.has(o.id))
+      if (newOrders.length) {
+        orders.value = [...newOrders, ...orders.value]
+      }
+    }
+  } catch {
+    // Gagal fetch = pakai data lokal saja
+  }
+})
 
 resetForm()
 </script>
