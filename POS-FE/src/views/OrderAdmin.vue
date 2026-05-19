@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { createProduk } from '../services/produk'
 
 const statusFilters = ['Semua', 'Diproses', 'Dikirim', 'Selesai', 'Dibatalkan']
 const periodFilters = ['Semua', 'Hari Ini']
@@ -59,6 +60,7 @@ const productFormError = ref('')
 const menuEditError = ref('')
 const productImageInputKey = ref(0)
 const editImageInputKey = ref(0)
+const productFile = ref(null)
 
 const menuOptions = ref([
   {
@@ -382,6 +384,7 @@ const resetProductForm = () => {
   productForm.image = ''
   productFormError.value = ''
   productImageInputKey.value += 1
+  productFile.value = null
 }
 
 const openProductForm = () => {
@@ -406,7 +409,7 @@ const closeProductForm = () => {
   resetProductForm()
 }
 
-const createProduct = () => {
+const createProduct = async () => {
   if (!isAdmin.value) {
     return
   }
@@ -437,6 +440,18 @@ const createProduct = () => {
     return
   }
 
+  // Kirim ke BE
+  try {
+    await createProduk(
+      { nama_produk: name, harga_produk: price, jenis_produk: type },
+      productFile.value
+    )
+  } catch (err) {
+    productFormError.value = err.message || 'Gagal menyimpan produk ke server.'
+    return
+  }
+
+  // Tambah ke daftar lokal setelah berhasil disimpan di BE
   menuOptions.value.push({ name, type, price, image })
   selectedMenus.value = [...selectedMenus.value, name]
   menuQtyDraft[name] = 1
@@ -447,12 +462,14 @@ const onProductImageChange = async (event) => {
   const file = event.target?.files?.[0]
   if (!file) {
     productForm.image = ''
+    productFile.value = null
     productFormError.value = ''
     return
   }
 
   if (!file.type.startsWith('image/')) {
     productForm.image = ''
+    productFile.value = null
     productFormError.value = 'File foto harus berupa gambar.'
     productImageInputKey.value += 1
     return
@@ -460,9 +477,11 @@ const onProductImageChange = async (event) => {
 
   try {
     productForm.image = await readFileAsDataUrl(file)
+    productFile.value = file
     productFormError.value = ''
   } catch {
     productFormError.value = 'Gagal membaca file foto.'
+    productFile.value = null
     productImageInputKey.value += 1
   }
 }

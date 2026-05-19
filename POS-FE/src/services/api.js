@@ -3,6 +3,7 @@ const API_BASE_URL = 'http://localhost:3000'
 /**
  * Wrapper fetch untuk semua request ke backend API.
  * Otomatis set header JSON dan attach token jika ada.
+ * Jika body berupa FormData, Content-Type tidak di-set (browser otomatis set multipart boundary).
  *
  * @param {string} endpoint - Path endpoint (contoh: '/auth/login')
  * @param {object} options - Opsi fetch (method, body, dll)
@@ -10,10 +11,15 @@ const API_BASE_URL = 'http://localhost:3000'
  */
 export async function apiFetch(endpoint, options = {}) {
   const token = localStorage.getItem('token')
+  const isFormData = options.body instanceof FormData
 
   const headers = {
-    'Content-Type': 'application/json',
     ...options.headers,
+  }
+
+  // Jangan set Content-Type untuk FormData, browser otomatis set dengan boundary
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json'
   }
 
   if (token) {
@@ -35,3 +41,4 @@ export async function apiFetch(endpoint, options = {}) {
 
   return data
 }
+
